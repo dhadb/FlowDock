@@ -1,0 +1,57 @@
+{
+  "name": "flowdock",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "A temporary file shelf for calmer cross-app work.",
+  "main": "electron/main.cjs",
+  "author": "dhadb",
+  "license": "MIT",
+  "scripts": {
+    "dev": "concurrently -k \"vite\" \"wait-on http://127.0.0.1:5173 && node ./node_modules/electron/cli.js . --flowdock-dev\"",
+    "start": "node ./node_modules/electron/cli.js .",
+    "build": "vite build",
+    "package": "npm run build && electron-builder",
+    "lint": "eslint . --max-warnings=0"
+  },
+  "build": {
+    "appId": "com.dhadb.flowdock",
+    "productName": "FlowDock",
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": "nsis"
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Utility"
+    }
+  },
+  "dependencies": {
+    "@radix-ui/react-switch": "^1.2.3",
+    "lucide-react": "^0.468.0",
+    "pdf-lib": "^1.17.1",
+    "qrcode": "^1.5.4",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "sharp": "^0.33.5"
+  },
+  "devDependencies": {
+    "@babel/eslint-parser": "^8.0.1",
+    "@babel/preset-react": "^8.0.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "concurrently": "^9.1.0",
+    "electron": "^33.4.11",
+    "electron-builder": "^25.1.8",
+    "eslint": "^9.16.0",
+    "eslint-plugin-react-hooks": "^5.1.0",
+    "eslint-plugin-react-refresh": "^0.4.16",
+    "vite": "^6.0.1",
+    "wait-on": "^8.0.1"
+  }
+}

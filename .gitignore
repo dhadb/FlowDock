@@ -1,0 +1,8 @@
+node_modules/
+dist/
+release/
+.vite/
+*.log
+*.tmp
+dev-server*.log
+qa-electron*.log
