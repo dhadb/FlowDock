@@ -6,6 +6,8 @@ contextBridge.exposeInMainWorld('flowdock', {
   pickFiles: () => ipcRenderer.invoke('vault:pick-files'),
   addText: (text, title) => ipcRenderer.invoke('vault:add-text', { text, title }),
   removeItem: (id) => ipcRenderer.invoke('vault:remove-item', id),
+  removeItems: (ids) => ipcRenderer.invoke('vault:remove-items', ids),
+  setPinned: (ids, pinned) => ipcRenderer.invoke('vault:set-pinned', ids, pinned),
   cleanExpired: () => ipcRenderer.invoke('vault:clean-expired'),
   openItem: (id) => ipcRenderer.invoke('vault:open-item', id),
   revealItem: (id) => ipcRenderer.invoke('vault:reveal-item', id),

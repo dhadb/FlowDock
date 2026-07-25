@@ -31,6 +31,12 @@ let preferences = {
   autoWebp: true,
   autoPdf: true,
   autoShareText: true,
+  theme: 'system',
+  accent: 'coral',
+  density: 'comfortable',
+  surfaceOpacity: 100,
+  motion: 'full',
+  autoHideDelayMs: 1250,
 }
 let isDocked = false
 let hideTimer
@@ -115,7 +121,7 @@ function scheduleHide() {
   clearTimeout(hideTimer)
   hideTimer = setTimeout(() => {
     if (mainWindow && !mainWindow.isDestroyed()) hideDock()
-  }, 1250)
+  }, preferences.autoHideDelayMs)
 }
 
 function isPointAtEdge(point) {
@@ -126,6 +132,26 @@ function isPointAtEdge(point) {
 
 function metadataPayload() {
   return JSON.stringify(items, null, 2)
+}
+
+function sanitizePreferences(next = {}) {
+  const pick = (value, allowed, fallback) => allowed.includes(value) ? value : fallback
+  const number = (value, fallback, min, max) => Number.isFinite(Number(value)) ? Math.min(max, Math.max(min, Number(value))) : fallback
+  return {
+    ...preferences,
+    side: pick(next.side ?? preferences.side, ['left', 'right'], preferences.side),
+    ttlHours: number(next.ttlHours ?? preferences.ttlHours, preferences.ttlHours, 1, 168),
+    imageThresholdMb: number(next.imageThresholdMb ?? preferences.imageThresholdMb, preferences.imageThresholdMb, 1, 15),
+    autoWebp: typeof next.autoWebp === 'boolean' ? next.autoWebp : preferences.autoWebp,
+    autoPdf: typeof next.autoPdf === 'boolean' ? next.autoPdf : preferences.autoPdf,
+    autoShareText: typeof next.autoShareText === 'boolean' ? next.autoShareText : preferences.autoShareText,
+    theme: pick(next.theme ?? preferences.theme, ['system', 'light', 'dark'], preferences.theme),
+    accent: pick(next.accent ?? preferences.accent, ['coral', 'mint', 'sky'], preferences.accent),
+    density: pick(next.density ?? preferences.density, ['comfortable', 'compact'], preferences.density),
+    surfaceOpacity: number(next.surfaceOpacity ?? preferences.surfaceOpacity, preferences.surfaceOpacity, 82, 100),
+    motion: pick(next.motion ?? preferences.motion, ['full', 'reduced'], preferences.motion),
+    autoHideDelayMs: number(next.autoHideDelayMs ?? preferences.autoHideDelayMs, preferences.autoHideDelayMs, 300, 3000),
+  }
 }
 
 async function persistItems() {
@@ -139,12 +165,12 @@ async function loadState() {
   preferencesPath = path.join(app.getPath('userData'), 'preferences.json')
   await fs.mkdir(vaultDir, { recursive: true })
   try {
-    items = JSON.parse(await fs.readFile(metadataPath, 'utf8'))
+    items = JSON.parse(await fs.readFile(metadataPath, 'utf8')).map((item) => ({ ...item, pinned: Boolean(item.pinned) }))
   } catch {
     items = []
   }
   try {
-    preferences = { ...preferences, ...JSON.parse(await fs.readFile(preferencesPath, 'utf8')) }
+    preferences = sanitizePreferences(JSON.parse(await fs.readFile(preferencesPath, 'utf8')))
   } catch {
     // Defaults are intentionally persisted only after a user change.
   }
@@ -191,6 +217,7 @@ function createItem({ name, filePath, kind, size, sourceName, note, shareUrl, sh
     transformations,
     createdAt: now,
     expiresAt: now + preferences.ttlHours * 60 * 60 * 1000,
+    pinned: false,
   }
 }
 
@@ -336,10 +363,33 @@ async function removeItem(id) {
   return items
 }
 
+async function removeItems(ids) {
+  const idSet = new Set((Array.isArray(ids) ? ids : []).filter((id) => typeof id === 'string'))
+  const removed = items.filter((item) => idSet.has(item.id))
+  if (!removed.length) return items
+  items = items.filter((item) => !idSet.has(item.id))
+  await Promise.all(removed.map(removeItemFiles))
+  await persistItems()
+  return items
+}
+
+async function setPinned(ids, pinned) {
+  const idSet = new Set((Array.isArray(ids) ? ids : []).filter((id) => typeof id === 'string'))
+  if (!idSet.size) return items
+  let changed = false
+  items = items.map((item) => {
+    if (!idSet.has(item.id) || item.pinned === Boolean(pinned)) return item
+    changed = true
+    return { ...item, pinned: Boolean(pinned) }
+  })
+  if (changed) await persistItems()
+  return items
+}
+
 async function cleanExpired(shouldPersist = true) {
-  const expired = items.filter((item) => item.expiresAt <= Date.now())
+  const expired = items.filter((item) => !item.pinned && item.expiresAt <= Date.now())
   if (!expired.length) return items
-  items = items.filter((item) => item.expiresAt > Date.now())
+  items = items.filter((item) => item.pinned || item.expiresAt > Date.now())
   await Promise.all(expired.map(removeItemFiles))
   if (shouldPersist) await persistItems()
   return items
@@ -435,6 +485,8 @@ function registerIpc() {
   })
   ipcMain.handle('vault:add-text', (_event, payload) => stageText(payload))
   ipcMain.handle('vault:remove-item', (_event, id) => removeItem(id))
+  ipcMain.handle('vault:remove-items', (_event, ids) => removeItems(ids))
+  ipcMain.handle('vault:set-pinned', (_event, ids, pinned) => setPinned(ids, pinned))
   ipcMain.handle('vault:clean-expired', () => cleanExpired(true))
   ipcMain.handle('vault:open-item', async (_event, id) => {
     const item = items.find((candidate) => candidate.id === id)
@@ -456,10 +508,13 @@ function registerIpc() {
   })
   ipcMain.handle('app:get-preferences', () => preferences)
   ipcMain.handle('app:set-preferences', async (_event, nextPreferences) => {
-    preferences = { ...preferences, ...nextPreferences }
+    const previousSide = preferences.side
+    preferences = sanitizePreferences(nextPreferences)
     await persistPreferences()
-    if (isDocked) hideDock()
-    else showDock()
+    if (previousSide !== preferences.side) {
+      if (isDocked) hideDock(true)
+      else showDock()
+    }
     return preferences
   })
   ipcMain.handle('app:toggle-window', () => {
