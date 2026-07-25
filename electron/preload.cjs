@@ -3,6 +3,7 @@ const { contextBridge, ipcRenderer, webUtils } = require('electron')
 contextBridge.exposeInMainWorld('flowdock', {
   getItems: () => ipcRenderer.invoke('vault:get-items'),
   addFilePaths: (paths) => ipcRenderer.invoke('vault:add-file-paths', paths),
+  pickFiles: () => ipcRenderer.invoke('vault:pick-files'),
   addText: (text, title) => ipcRenderer.invoke('vault:add-text', { text, title }),
   removeItem: (id) => ipcRenderer.invoke('vault:remove-item', id),
   cleanExpired: () => ipcRenderer.invoke('vault:clean-expired'),
@@ -23,5 +24,10 @@ contextBridge.exposeInMainWorld('flowdock', {
     const listener = (_event, preferences) => callback(preferences)
     ipcRenderer.on('preferences:changed', listener)
     return () => ipcRenderer.removeListener('preferences:changed', listener)
+  },
+  onDockState: (callback) => {
+    const listener = (_event, state) => callback(state)
+    ipcRenderer.on('app:dock-state', listener)
+    return () => ipcRenderer.removeListener('app:dock-state', listener)
   },
 })

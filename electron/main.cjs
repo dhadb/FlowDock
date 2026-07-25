@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, Tray, globalShortcut, ipcMain, screen, shell, clipboard, nativeImage } = require('electron')
+const { app, BrowserWindow, Menu, Tray, dialog, globalShortcut, ipcMain, screen, shell, clipboard, nativeImage } = require('electron')
 const { randomUUID } = require('crypto')
 const fs = require('fs/promises')
 const fssync = require('fs')
@@ -9,9 +9,9 @@ const sharp = require('sharp')
 const { PDFDocument } = require('pdf-lib')
 const QRCode = require('qrcode')
 
-const PANEL_WIDTH = 410
-const PANEL_HEIGHT = 720
-const EDGE_HANDLE = 14
+const PANEL_WIDTH = 456
+const PANEL_HEIGHT = 760
+const EDGE_HANDLE = 12
 const CLEANUP_INTERVAL = 60 * 60 * 1000
 const IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.webp', '.gif', '.tif', '.tiff', '.avif', '.bmp'])
 const TEXT_EXTENSIONS = new Set(['.txt', '.md', '.js', '.jsx', '.ts', '.tsx', '.json', '.css', '.html', '.py', '.java', '.go', '.rs', '.yaml', '.yml', '.xml', '.csv', '.log'])
@@ -34,6 +34,7 @@ let preferences = {
 }
 let isDocked = false
 let hideTimer
+let boundsAnimation
 
 function appIcon() {
   return nativeImage.createFromDataURL('data:image/svg+xml;base64,' + Buffer.from(`
@@ -65,28 +66,56 @@ function hiddenBounds() {
   }
 }
 
+function animateWindowTo(target, duration, onComplete) {
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  clearInterval(boundsAnimation)
+  const initial = mainWindow.getBounds()
+  const startedAt = Date.now()
+  const easeOutQuint = (progress) => 1 - ((1 - progress) ** 5)
+  boundsAnimation = setInterval(() => {
+    if (!mainWindow || mainWindow.isDestroyed()) return clearInterval(boundsAnimation)
+    const progress = Math.min(1, (Date.now() - startedAt) / duration)
+    const eased = easeOutQuint(progress)
+    mainWindow.setBounds({
+      x: Math.round(initial.x + (target.x - initial.x) * eased),
+      y: Math.round(initial.y + (target.y - initial.y) * eased),
+      width: target.width,
+      height: target.height,
+    }, true)
+    if (progress === 1) {
+      clearInterval(boundsAnimation)
+      onComplete?.()
+    }
+  }, 16)
+}
+
 function showDock() {
   if (!mainWindow) return
   clearTimeout(hideTimer)
   isDocked = false
-  mainWindow.setBounds(visibleBounds(), true)
   mainWindow.showInactive()
   mainWindow.setAlwaysOnTop(true, 'floating')
-  mainWindow.webContents.send('app:dock-state', 'open')
+  mainWindow.webContents.send('app:dock-state', 'opening')
+  animateWindowTo(visibleBounds(), 210, () => mainWindow?.webContents.send('app:dock-state', 'open'))
 }
 
-function hideDock() {
+function hideDock(instant = false) {
   if (!mainWindow || mainWindow.isDestroyed()) return
   isDocked = true
-  mainWindow.setBounds(hiddenBounds(), true)
-  mainWindow.webContents.send('app:dock-state', 'hidden')
+  mainWindow.webContents.send('app:dock-state', 'closing')
+  if (instant) {
+    mainWindow.setBounds(hiddenBounds(), true)
+    mainWindow.webContents.send('app:dock-state', 'hidden')
+    return
+  }
+  animateWindowTo(hiddenBounds(), 170, () => mainWindow?.webContents.send('app:dock-state', 'hidden'))
 }
 
 function scheduleHide() {
   clearTimeout(hideTimer)
   hideTimer = setTimeout(() => {
     if (mainWindow && !mainWindow.isDestroyed()) hideDock()
-  }, 900)
+  }, 1250)
 }
 
 function isPointAtEdge(point) {
@@ -370,7 +399,7 @@ function createWindow() {
   else mainWindow.loadFile(path.join(__dirname, '..', 'dist', 'index.html'))
 
   mainWindow.once('ready-to-show', () => {
-    hideDock()
+    hideDock(true)
     mainWindow.showInactive()
   })
   mainWindow.on('blur', scheduleHide)
@@ -394,6 +423,16 @@ function createTray() {
 function registerIpc() {
   ipcMain.handle('vault:get-items', () => items)
   ipcMain.handle('vault:add-file-paths', (_event, paths) => stageFilePaths(paths))
+  ipcMain.handle('vault:pick-files', async () => {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: '加入 FlowDock',
+      buttonLabel: '放入暂存架',
+      properties: ['openFile', 'multiSelections'],
+    })
+    if (result.canceled || !result.filePaths.length) return { canceled: true, count: 0 }
+    await stageFilePaths(result.filePaths)
+    return { canceled: false, count: result.filePaths.length }
+  })
   ipcMain.handle('vault:add-text', (_event, payload) => stageText(payload))
   ipcMain.handle('vault:remove-item', (_event, id) => removeItem(id))
   ipcMain.handle('vault:clean-expired', () => cleanExpired(true))
